@@ -15,6 +15,9 @@ if IS_WINDOWS
   # windows
   # use ruby file logger
   require 'logger'
+  unless File.exist? 'C:/ProgramData/os_patching/'
+    Dir.mkdir 'C:/ProgramData/os_patching/'
+  end
   log = Logger.new('C:/ProgramData/os_patching/os_patching_task.log', 'monthly')
   # set paths/commands for windows
   fact_generation_script = 'C:/ProgramData/os_patching/os_patching_fact_generation.ps1'
@@ -270,7 +273,7 @@ else
     family = 'Suse'
     major = 11
   elsif IS_WINDOWS
-    family = "Windows"
+    family = "windows"
     major = "2019"
   end
   factstring = {"name"=>"fake-bolt-facts", "values"=>{"os"=>{"family"=>"#{family}", "release" => { "major" => "#{major}"  }}, "os_patching"=>{"package_updates"=>[], "package_update_count"=>1, "missing_update_kbs"=>[], "security_package_updates"=>[], "security_package_update_count"=>0, "blackouts"=>{}, "pinned_packages"=>[''], "last_run"=>{}, "patch_window"=>"", "reboot_override"=>"default", "block_patching_on_warnings"=>"false", "warnings"=>{}, "blocked"=>"false", "blocked_reasons"=>[]}}}
