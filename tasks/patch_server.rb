@@ -561,7 +561,7 @@ elsif facts['values']['os']['family'] == 'windows'
   # we're on windows
 
   # Are we doing security only patching?
-  security_arg = if security_only == true
+  security_arg = if security_only == true  && under_bolt == false
                    '-SecurityOnly'
                  else
                    ''
@@ -623,7 +623,7 @@ elsif facts['values']['os']['family'] == 'Suse'
     zypper_cmd_params = "#{zypper_cmd_params} --replacefiles"
   end
   pkg_list = []
-  if security_only == true
+  if security_only == true && under_bolt == false
     pkg_list = facts['values']['os_patching']['security_package_updates']
     log.info 'Running zypper patch'
     status, output = run_with_timeout("zypper #{zypper_required_params} #{zypper_params} patch -g security #{zypper_cmd_params}", timeout, 2)
