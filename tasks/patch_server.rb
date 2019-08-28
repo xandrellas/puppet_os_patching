@@ -267,9 +267,9 @@ else
     family = 'RedHat'
     major = 7
   elsif File.exist?('/etc/SuSE-release')
-    family = 'SLES'
+    family = 'Suse'
     major = 11
-  elseif IS_WINDOWS
+  elsif IS_WINDOWS
     family = "Windows"
     major = "2019"
   end
