@@ -1,4 +1,4 @@
-#!/opt/puppetlabs/puppet/bin/ruby
+#!/usr/bin/env ruby
 
 require 'rbconfig'
 require 'open3'
@@ -45,8 +45,10 @@ def history(dts, message, code, reboot, security, job)
                 else
                   '/var/cache/os_patching/run_history'
                 end
-  open(historyfile, 'a') do |f|
-    f.puts "#{dts}|#{message}|#{code}|#{reboot}|#{security}|#{job}"
+  if File.exist? historyfile
+    open(historyfile, 'a') do |f|
+      f.puts "#{dts}|#{message}|#{code}|#{reboot}|#{security}|#{job}"
+    end
   end
 end
 
@@ -248,29 +250,47 @@ end
 log.info 'os_patching run started'
 
 # ensure node has been tagged with os_patching class by checking for fact generation script
-log.debug 'Running os_patching fact refresh'
-unless File.exist? fact_generation_script
-  err(
-    255,
-    "os_patching/#{fact_generation_script}",
-    "#{fact_generation_script} does not exist, declare os_patching and run Puppet first",
-    starttime,
-  )
+factstring = ''
+under_bolt = false
+if File.exist? fact_generation_script
+  log.debug 'Running os_patching fact refresh'
+  # Cache the facts
+  log.debug 'Gathering facts'
+  full_facts, stderr, status = Open3.capture3(puppet_cmd, 'facts')
+  err(status, 'os_patching/facter', stderr, starttime) if status != 0
+  factstring = JSON.parse(full_facts)
+else
+  family = ''
+  if File.exist?('/etc/debian_version')
+    family = 'Debian'
+  elsif File.exist?('/etc/redhat-release') or File.exist?('/etc/centos-release')
+    family = 'RedHat'
+    major = 7
+  elsif File.exist?('/etc/SuSE-release')
+    family = 'SLES'
+    major = 11
+  elseif IS_WINDOWS
+    family = "Windows"
+    major = "2019"
+  end
+  factstring = {"name"=>"fake-bolt-facts", "values"=>{"os"=>{"family"=>"#{family}", "release" => { "major" => "#{major}"  }}, "os_patching"=>{"package_updates"=>["fake-bolt-package"], "package_update_count"=>1, "missing_update_kbs"=>[], "security_package_updates"=>[], "security_package_update_count"=>0, "blackouts"=>{}, "pinned_packages"=>[''], "last_run"=>{}, "patch_window"=>"", "reboot_override"=>"default", "block_patching_on_warnings"=>"false", "warnings"=>{}, "blocked"=>"false", "blocked_reasons"=>[]}}}
+  under_bolt = true
+  log.debug 'os_patching facts not found, using synthetic facts'
 end
 
-# Cache the facts
-log.debug 'Gathering facts'
-full_facts, stderr, status = Open3.capture3(puppet_cmd, 'facts')
-err(status, 'os_patching/facter', stderr, starttime) if status != 0
-facts = JSON.parse(full_facts)
+facts = factstring
 
 # Check we are on a supported platform
-unless facts['values']['os']['family'] == 'RedHat' || facts['values']['os']['family'] == 'Debian' || facts['values']['os']['family'] == 'Suse' || facts['values']['os']['family'] == 'windows'
+unless facts['values']['os']['family'] == 'RedHat' || facts['values']['os']['family'] == 'Debian' || facts['values']['os']['family'] == 'Suse' || facts['values']['os']['family'] == 'windows' || facts['values']['os']['family'] == 'BoltBypass'
   err(200, 'os_patching/unsupported_os', 'Unsupported OS', starttime)
 end
 
 # Get the pinned packages
-pinned_pkgs = facts['values']['os_patching']['pinned_packages']
+if facts['values']['os_patching']
+  pinned_pkgs = facts['values']['os_patching']['pinned_packages']
+else
+  pinned_pkgs = []
+end
 
 # Should we clean the cache prior to starting?
 if params['clean_cache'] && params['clean_cache'] == true
@@ -289,7 +309,7 @@ end
 # Refresh the patching fact cache on non-windows systems
 # Windows scans can take a long time, and we do one at the start of the os_patching_windows script anyway.
 # No need to do yet another scan prior to this, it just wastes valuable time.
-if facts['values']['os']['family'] != 'windows'
+if facts['values']['os']['family'] != 'windows' && under_bolt == false
   _fact_out, stderr, status = Open3.capture3(fact_generation_cmd)
   err(status, 'os_patching/fact_refresh', stderr, starttime) if status != 0
 end
@@ -473,7 +493,9 @@ if facts['values']['os']['family'] == 'RedHat'
     # we captured.  Append ':59' to the date as yum history only gives the
     # minute and if yum bails, it will usually be pretty quick
     parsed_end = Time.parse(yum_end + ':59').iso8601
-    err(1, 'os_patching/yum', 'Yum did not appear to run', starttime) if parsed_end < starttime
+    if parsed_end < starttime && under_bolt == false
+      err(1, 'os_patching/yum', 'Yum did not appear to run', starttime)
+    end
 
     # Capture the yum return code
     log.debug "Getting yum return code for job #{job}"
@@ -487,22 +509,29 @@ if facts['values']['os']['family'] == 'RedHat'
       break
     end
 
-    err(status, 'os_patching/yum', 'yum return code not found', starttime) if yum_return.empty?
-
-    pkg_hash = {}
-    # Pull out the updated package list from yum history
-    log.debug "Getting updated package list for job #{job}"
-    updated_packages, stderr, status = Open3.capture3("yum history info #{job}")
-    err(status, 'os_patching/yum', stderr, starttime) if status != 0
-    updated_packages.split("\n").each do |line|
-      matchdata = line.match(/^\s+(Installed|Install|Upgraded|Erased|Updated)\s+(\S+)\s/)
-      next unless matchdata
-      pkg_hash[matchdata[2]] = matchdata[1]
+    if yum_return.empty? && under_bolt == false
+      err(status, 'os_patching/yum', 'yum return code not found', starttime)
+    elsif under_bolt == true
+      log.info "running under bolt - no job info available"
+      pkg_hash = {}
+      job = 'Unknown - running under bolt'
+      yum_return = 'Success'
+    elsif yum_return && under_bolt == false
+      pkg_hash = {}
+      # Pull out the updated package list from yum history
+      log.info "Getting updated package list for job #{job}"
+      updated_packages, stderr, status = Open3.capture3("yum history info #{job}")
+      err(status, 'os_patching/yum', stderr, starttime) if status != 0
+      updated_packages.split("\n").each do |line|
+        matchdata = line.match(/^\s+(Installed|Install|Upgraded|Erased|Updated)\s+(\S+)\s/)
+        next unless matchdata
+        pkg_hash[matchdata[2]] = matchdata[1]
+      end
+    else
+      yum_return = 'Assumed successful - further details not available'
+      job = 'Unsupported'
+      pkg_hash = {}
     end
-  else
-    yum_return = 'Assumed successful - further details not available on RHEL5'
-    job = 'Unsupported on RHEL5'
-    pkg_hash = {}
   end
 
   output(yum_return, reboot, security_only, 'Patching complete', pkg_hash, output, job, pinned_pkgs, starttime)
@@ -618,7 +647,7 @@ end
 # Windows scans can take an eternity after a patch run prior to being reboot (30+ minutes in a lab on 2008 versions..)
 # Best not to delay the whole patching process here.
 # Note that the fact refresh (which includes a scan) runs on system startup anyway - see os_patching puppet class
-if facts['values']['os']['family'] != 'windows'
+if facts['values']['os']['family'] != 'windows' && under_bolt == false
   log.info 'Running os_patching fact refresh'
   _fact_out, stderr, status = Open3.capture3(fact_generation_cmd)
   err(status, 'os_patching/fact', stderr, starttime) if status != 0
