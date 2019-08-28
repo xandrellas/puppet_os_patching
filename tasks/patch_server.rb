@@ -273,7 +273,7 @@ else
     family = "Windows"
     major = "2019"
   end
-  factstring = {"name"=>"fake-bolt-facts", "values"=>{"os"=>{"family"=>"#{family}", "release" => { "major" => "#{major}"  }}, "os_patching"=>{"package_updates"=>["fake-bolt-package"], "package_update_count"=>1, "missing_update_kbs"=>[], "security_package_updates"=>[], "security_package_update_count"=>0, "blackouts"=>{}, "pinned_packages"=>[''], "last_run"=>{}, "patch_window"=>"", "reboot_override"=>"default", "block_patching_on_warnings"=>"false", "warnings"=>{}, "blocked"=>"false", "blocked_reasons"=>[]}}}
+  factstring = {"name"=>"fake-bolt-facts", "values"=>{"os"=>{"family"=>"#{family}", "release" => { "major" => "#{major}"  }}, "os_patching"=>{"package_updates"=>[], "package_update_count"=>1, "missing_update_kbs"=>[], "security_package_updates"=>[], "security_package_update_count"=>0, "blackouts"=>{}, "pinned_packages"=>[''], "last_run"=>{}, "patch_window"=>"", "reboot_override"=>"default", "block_patching_on_warnings"=>"false", "warnings"=>{}, "blocked"=>"false", "blocked_reasons"=>[]}}}
   under_bolt = true
   log.debug 'os_patching facts not found, using synthetic facts'
 end
@@ -540,7 +540,7 @@ elsif facts['values']['os']['family'] == 'Debian'
   # Are we doing security only patching?
   apt_mode = ''
   pkg_list = []
-  if security_only == true
+  if security_only == true && under_bolt == false
     pkg_list = facts['values']['os_patching']['security_package_updates']
     apt_mode = 'install ' + pkg_list.join(' ')
   else
