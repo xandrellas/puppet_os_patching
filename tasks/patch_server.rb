@@ -464,7 +464,7 @@ if facts['values']['os']['family'] == 'RedHat'
   status, output = run_with_timeout("yum #{yum_params} #{securityflag} upgrade -y", timeout, 2)
   err(status, 'os_patching/yum', "yum upgrade returned non-zero (#{status}) : #{output}", starttime) if status != 0
 
-  if facts['values']['os']['release']['major'].to_i > 5 || facts['values']['os']['name'] == 'Amazon'
+  if facts['values']['os']['name'] == 'CentOS' && if facts['values']['os']['release']['major'].to_i > 5 || facts['values']['os']['name'] == 'Amazon' && facts['values']['os']['release']['major'].to_i > 1
     # Capture the yum job ID
     log.info 'Getting yum job ID'
     job = ''
